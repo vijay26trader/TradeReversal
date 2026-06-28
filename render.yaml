@@ -1,0 +1,45 @@
+services:
+  # ── Flask Web Dashboard ────────────────────────────────────────────────────
+  - type: web
+    name: tradereversal-web
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: DB_PATH
+        value: /data/signals.db
+      - key: PYTHON_VERSION
+        value: 3.12.0
+    disk:
+      name: reversal-storage
+      mountPath: /data
+      sizeGB: 1
+
+  # ── Scanner Cron Job ───────────────────────────────────────────────────────
+  - type: cron
+    name: tradereversal-scanner
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    schedule: "*/2 13-22 * * 1-5"    # every 2 mins, Mon-Fri, UTC 13-22 = EST 9AM-6PM
+    startCommand: python scanner.py
+    envVars:
+      - key: DB_PATH
+        value: /data/signals.db
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: EMAIL_SENDER
+        sync: false
+      - key: EMAIL_PASSWORD
+        sync: false
+      - key: EMAIL_RECEIVER
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: EXTRA_TICKERS
+        sync: false
+    disk:
+      name: reversal-storage
+      mountPath: /data
+      sizeGB: 1

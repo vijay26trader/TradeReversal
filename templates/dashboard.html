@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta http-equiv="refresh" content="120">
+<title>TradeReversal — Signal Scanner</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}
+
+  header{background:linear-gradient(135deg,#1a1f35,#0d1117);padding:18px 28px;
+         border-bottom:2px solid #7c3aed;display:flex;align-items:center;
+         justify-content:space-between;flex-wrap:wrap;gap:10px}
+  header h1{font-size:1.3rem;color:#f0f6fc;display:flex;align-items:center;gap:10px}
+  .live-dot{display:inline-block;width:9px;height:9px;background:#7c3aed;
+            border-radius:50%;animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 #7c3aed88}
+                   50%{opacity:.6;box-shadow:0 0 0 6px #7c3aed00}}
+  .meta{font-size:0.78rem;color:#8b949e}
+  .badge{border-radius:4px;padding:2px 8px;font-size:0.7rem}
+  .badge.flask{background:#1a3a5c;color:#58a6ff}
+  .badge.sqlite{background:#2d1f3d;color:#bc8cff}
+  .badge.live{background:#3a1f5c;color:#a78bfa}
+
+  .stats{display:flex;gap:12px;padding:14px 28px;background:#0f1320;
+         border-bottom:1px solid #1e2340;flex-wrap:wrap}
+  .stat{background:#141829;border:1px solid #1e2340;border-radius:8px;
+        padding:10px 18px;min-width:125px}
+  .stat .label{font-size:0.67rem;color:#6b7280;text-transform:uppercase;letter-spacing:.06em}
+  .stat .value{font-size:1.25rem;font-weight:700;margin-top:4px}
+  .v-white{color:#f0f6fc}.v-green{color:#34d399}.v-red{color:#f87171}
+  .v-gold{color:#fbbf24}.v-purple{color:#a78bfa}
+
+  .toolbar{padding:12px 28px;display:flex;gap:10px;align-items:center;
+           background:#0d1117;flex-wrap:wrap;border-bottom:1px solid #1e2340}
+  .toolbar form{display:flex;gap:10px;align-items:center;flex-wrap:wrap;width:100%}
+  .toolbar select,.toolbar input{background:#141829;border:1px solid #1e2340;
+    color:#c9d1d9;border-radius:6px;padding:6px 10px;font-size:0.82rem}
+  .toolbar select:focus,.toolbar input:focus{outline:none;border-color:#7c3aed}
+  .toolbar button{border:none;border-radius:6px;padding:6px 14px;
+    cursor:pointer;font-size:0.82rem;font-weight:500}
+  .btn-primary{background:#7c3aed;color:#fff}
+  .btn-primary:hover{background:#6d28d9}
+  .btn-sec{background:#141829;border:1px solid #1e2340;color:#c9d1d9}
+  .btn-sec:hover{background:#1e2340}
+  .count{margin-left:auto;font-size:0.78rem;color:#6b7280;white-space:nowrap}
+
+  .table-wrap{overflow-x:auto;padding:0 28px 32px}
+  table{width:100%;border-collapse:collapse;font-size:0.8rem;margin-top:14px}
+  thead tr{background:#0f1320;position:sticky;top:0;z-index:1}
+  thead th{padding:9px 10px;text-align:left;color:#6b7280;font-weight:600;
+           border-bottom:2px solid #1e2340;white-space:nowrap}
+  tbody tr{border-bottom:1px solid #141829;transition:background .12s}
+  tbody tr:hover{background:#141829}
+  tbody td{padding:8px 10px;white-space:nowrap}
+
+  tr.long{border-left:3px solid #34d399}
+  tr.short{border-left:3px solid #f87171}
+
+  .signal-badge{font-weight:700;font-size:0.72rem;padding:2px 8px;border-radius:4px}
+  .signal-badge.long{background:#064e3b;color:#34d399}
+  .signal-badge.short{background:#450a0a;color:#f87171}
+  .status-badge{background:#1e1b4b;color:#a78bfa;border-radius:4px;
+                padding:2px 7px;font-size:0.72rem}
+  .tf-badge{background:#1e2340;color:#93c5fd;border-radius:4px;
+            padding:2px 6px;font-size:0.7rem}
+
+  .bullish{color:#34d399;font-weight:600}
+  .bearish{color:#f87171;font-weight:600}
+  .pos{color:#34d399}.neg{color:#f87171}
+  .strength{letter-spacing:2px;color:#fbbf24}
+
+  .empty{text-align:center;padding:60px;color:#6b7280}
+  .api-bar{padding:7px 28px;background:#0d1117;font-size:0.73rem;color:#6b7280;
+           border-bottom:1px solid #141829}
+  .api-bar a{color:#a78bfa;text-decoration:none;margin-right:14px}
+  .api-bar a:hover{text-decoration:underline}
+
+  footer{text-align:center;font-size:0.72rem;color:#6b7280;
+         padding:14px;border-top:1px solid #141829;margin-top:8px}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>
+      <span class="live-dot"></span>
+      TradeReversal
+      <span class="badge live">● LIVE</span>
+      <span class="badge flask">Flask</span>
+      <span class="badge sqlite">SQLite</span>
+    </h1>
+    <div class="meta">
+      VWAP Deviation · RSI Divergence · Volume · Signal Strength &nbsp;|&nbsp;
+      Scans every 2 mins · Mon–Fri 9 AM – 6 PM EST · Auto-refreshes every 2 mins
+    </div>
+  </div>
+  <div class="meta" style="text-align:right">
+    Last scan: <strong>{{ stats.last_scan }}</strong><br>
+    Page: <strong>{{ now }}</strong>
+  </div>
+</header>
+
+<!-- Stats Bar -->
+<div class="stats">
+  <div class="stat">
+    <div class="label">Today's Signals</div>
+    <div class="value v-white">{{ stats.today }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Today Long</div>
+    <div class="value v-green">{{ stats.long_today }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Today Short</div>
+    <div class="value v-red">{{ stats.short_today }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">★★★ High Strength</div>
+    <div class="value v-gold">{{ stats.high_strength }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">All-Time Total</div>
+    <div class="value v-purple">{{ stats.total }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Top Symbol (7d)</div>
+    <div class="value v-white" style="font-size:0.95rem">{{ stats.top_symbol }}</div>
+  </div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <form method="GET" action="/">
+    <select name="symbol">
+      <option value="">All Symbols</option>
+      {% for s in symbols %}
+      <option value="{{ s }}" {% if filters.symbol==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+
+    <select name="signal">
+      <option value="">All Signals</option>
+      <option value="LONG"  {% if filters.signal=='LONG'  %}selected{% endif %}>LONG</option>
+      <option value="SHORT" {% if filters.signal=='SHORT' %}selected{% endif %}>SHORT</option>
+    </select>
+
+    <select name="strength">
+      <option value="">All Strengths</option>
+      <option value="3" {% if filters.strength=='3' %}selected{% endif %}>★★★ High</option>
+      <option value="2" {% if filters.strength=='2' %}selected{% endif %}>★★ Medium</option>
+      <option value="1" {% if filters.strength=='1' %}selected{% endif %}>★ Low</option>
+    </select>
+
+    <select name="days">
+      <option value="1"  {% if filters.days==1  %}selected{% endif %}>Today</option>
+      <option value="7"  {% if filters.days==7  %}selected{% endif %}>Last 7 days</option>
+      <option value="30" {% if filters.days==30 %}selected{% endif %}>Last 30 days</option>
+      <option value="90" {% if filters.days==90 %}selected{% endif %}>Last 90 days</option>
+    </select>
+
+    <button type="submit" class="btn-primary">🔍 Filter</button>
+    <button type="button" class="btn-sec" onclick="window.location='/'">✕ Clear</button>
+    <button type="button" class="btn-sec" onclick="window.location.reload()">↻ Refresh</button>
+    <button type="button" class="btn-sec" onclick="exportCSV()">⬇ CSV</button>
+    <span class="count">{{ results|length }} signal(s)</span>
+  </form>
+</div>
+
+<!-- API Links -->
+<div class="api-bar">
+  API:
+  <a href="/api/signals" target="_blank">/api/signals</a>
+  <a href="/api/stats"   target="_blank">/api/stats</a>
+  <a href="/health"      target="_blank">/health</a>
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+  {% if not results %}
+  <p class="empty">⏳ No signals match your filters. Scanner runs during market hours Mon–Fri.</p>
+  {% else %}
+  <table id="signalTable">
+    <thead>
+      <tr>
+        <th>⏱ Timestamp</th>
+        <th>Symbol</th>
+        <th>TF</th>
+        <th>Price</th>
+        <th>VWAP</th>
+        <th>% from VWAP</th>
+        <th>RSI (14)</th>
+        <th>RSI Divergence</th>
+        <th>Volume</th>
+        <th>Vol Ratio</th>
+        <th>Signal</th>
+        <th>Strength</th>
+        <th>Stop Loss</th>
+        <th>Target</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      {% set sc = 'long' if r.signal=='LONG' else 'short' %}
+      {% set dc = 'bullish' if r.divergence=='Bullish' else ('bearish' if r.divergence=='Bearish' else '') %}
+      {% set pc = 'neg' if r.pct_from_vwap < 0 else 'pos' %}
+      <tr class="{{ sc }}">
+        <td>{{ r.timestamp }}</td>
+        <td><strong>{{ r.symbol }}</strong></td>
+        <td><span class="tf-badge">{{ r.timeframe }}</span></td>
+        <td>${{ r.price }}</td>
+        <td>${{ r.vwap }}</td>
+        <td class="{{ pc }}">{{ "%+.2f"|format(r.pct_from_vwap) }}%</td>
+        <td>{{ r.rsi }}</td>
+        <td class="{{ dc }}">{{ r.divergence }}</td>
+        <td>{{ "{:,}".format(r.volume) }}{% if r.vol_ratio >= 1.2 %} 🔥{% endif %}</td>
+        <td>{{ r.vol_ratio }}×</td>
+        <td><span class="signal-badge {{ sc }}">{{ r.signal }}</span></td>
+        <td class="strength">{{ '★' * r.strength }}{{ '☆' * (3 - r.strength) }}</td>
+        <td>${{ r.stop_loss }}</td>
+        <td>${{ r.target }}</td>
+        <td><span class="status-badge">{{ r.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<footer>
+  TradeReversal · Flask + SQLite on Render · Persistent disk · Zero redeploys on data updates ·
+  ⚠️ Informational only — not financial advice
+</footer>
+
+<script>
+function exportCSV() {
+  const rows = [...document.querySelectorAll('#signalTable tr')];
+  const csv  = rows.map(r =>
+    [...r.querySelectorAll('th,td')]
+      .map(c => '"' + c.innerText.replace(/"/g,'""') + '"')
+      .join(',')
+  ).join('\n');
+  const a    = document.createElement('a');
+  a.href     = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'tradereversal_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+</script>
+</body>
+</html>

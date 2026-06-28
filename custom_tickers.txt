@@ -1,0 +1,7 @@
+# Add custom tickers below, one per line.
+# Lines starting with # are ignored.
+# Added on top of the default Top-10 S&P 500 list.
+# Example:
+# NFLX
+# AMD
+# PLTR
