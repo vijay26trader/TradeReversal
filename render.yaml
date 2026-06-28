@@ -1,5 +1,5 @@
 services:
-  # ── Flask Web Dashboard ────────────────────────────────────────────────────
+  # ── Flask Web Dashboard (holds the persistent disk) ───────────────────────
   - type: web
     name: tradereversal-web
     runtime: python
@@ -8,6 +8,8 @@ services:
     envVars:
       - key: DB_PATH
         value: /data/signals.db
+      - key: INGEST_SECRET
+        generateValue: true
       - key: PYTHON_VERSION
         value: 3.12.0
     disk:
@@ -15,18 +17,21 @@ services:
       mountPath: /data
       sizeGB: 1
 
-  # ── Scanner Cron Job ───────────────────────────────────────────────────────
+  # ── Scanner Cron Job (no disk — posts signals to web service via HTTP) ────
   - type: cron
     name: tradereversal-scanner
     runtime: python
     buildCommand: pip install -r requirements.txt
-    schedule: "*/2 13-22 * * 1-5"    # every 2 mins, Mon-Fri, UTC 13-22 = EST 9AM-6PM
+    schedule: "*/2 13-22 * * 1-5"   # every 2 mins, Mon-Fri, UTC 13-22 = EST 9AM-6PM
     startCommand: python scanner.py
     envVars:
-      - key: DB_PATH
-        value: /data/signals.db
-      - key: PYTHON_VERSION
-        value: 3.12.0
+      - key: INGEST_URL
+        value: https://tradereversal-web.onrender.com/api/ingest
+      - key: INGEST_SECRET
+        fromService:
+          name: tradereversal-web
+          type: web
+          envVarKey: INGEST_SECRET
       - key: EMAIL_SENDER
         sync: false
       - key: EMAIL_PASSWORD
@@ -39,7 +44,5 @@ services:
         value: 587
       - key: EXTRA_TICKERS
         sync: false
-    disk:
-      name: reversal-storage
-      mountPath: /data
-      sizeGB: 1
+      - key: PYTHON_VERSION
+        value: 3.12.0

@@ -1,22 +1,57 @@
 #!/usr/bin/env python3
 """
-TradeReversal — Flask Dashboard
-Reads signals.db from Render persistent disk on every request.
-Zero redeploys when scanner updates data.
+TradeReversal — Flask Dashboard + Ingest API
+Receives signals from the scanner cron job via POST /api/ingest.
+Stores them in SQLite on the persistent disk.
+Serves the live dashboard — zero redeploys on data updates.
 """
 
 import os
+import hmac
 import sqlite3
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, abort
 
 app = Flask(__name__)
 
-EST     = ZoneInfo("America/New_York")
-DB_FILE = os.environ.get("DB_PATH", "data/signals.db")
+EST           = ZoneInfo("America/New_York")
+DB_FILE       = os.environ.get("DB_PATH", "data/signals.db")
+INGEST_SECRET = os.environ.get("INGEST_SECRET", "")
 
-# ── DB Helpers ────────────────────────────────────────────────────────────────
+# ── DB Setup ──────────────────────────────────────────────────────────────────
+
+def init_db():
+    os.makedirs(os.path.dirname(DB_FILE) or ".", exist_ok=True)
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp     TEXT    NOT NULL,
+            scan_date     TEXT    NOT NULL,
+            symbol        TEXT    NOT NULL,
+            timeframe     TEXT    NOT NULL DEFAULT '15m',
+            price         REAL    NOT NULL,
+            vwap          REAL    NOT NULL,
+            pct_from_vwap REAL    NOT NULL,
+            rsi           REAL    NOT NULL,
+            divergence    TEXT    NOT NULL,
+            volume        INTEGER NOT NULL,
+            vol_avg       INTEGER NOT NULL,
+            vol_ratio     REAL    NOT NULL,
+            signal        TEXT    NOT NULL,
+            strength      INTEGER NOT NULL,
+            stop_loss     REAL    NOT NULL,
+            target        REAL    NOT NULL,
+            status        TEXT    NOT NULL DEFAULT 'New'
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_date   ON signals(scan_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_symbol ON signals(symbol)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_signal ON signals(signal)")
+    conn.commit()
+    conn.close()
+
 
 def get_db():
     conn = sqlite3.connect(DB_FILE)
@@ -27,6 +62,7 @@ def get_db():
 def db_exists() -> bool:
     return os.path.exists(DB_FILE)
 
+# ── DB Queries ────────────────────────────────────────────────────────────────
 
 def fetch_signals(days=30, symbol="", signal="", strength="", timeframe="") -> list[dict]:
     if not db_exists():
@@ -56,7 +92,6 @@ def fetch_stats() -> dict:
     }
     if not db_exists():
         return empty
-
     today = datetime.now(EST).strftime("%Y-%m-%d")
     conn  = get_db()
 
@@ -70,7 +105,6 @@ def fetch_stats() -> dict:
         "short_today":   q("SELECT COUNT(*) FROM signals WHERE signal='SHORT' AND scan_date=?", (today,)),
         "high_strength": q("SELECT COUNT(*) FROM signals WHERE strength=3 AND scan_date=?", (today,)),
     }
-
     row = conn.execute("""
         SELECT symbol, COUNT(*) cnt FROM signals
         WHERE scan_date >= date('now','-7 days')
@@ -80,7 +114,6 @@ def fetch_stats() -> dict:
 
     last = conn.execute("SELECT timestamp FROM signals ORDER BY id DESC LIMIT 1").fetchone()
     stats["last_scan"] = last["timestamp"] if last else "No scans yet"
-
     conn.close()
     return stats
 
@@ -104,15 +137,62 @@ def index():
     days      = int(request.args.get("days", 30))
 
     return render_template("dashboard.html",
-        results   = fetch_signals(days, symbol, signal, strength, timeframe),
-        stats     = fetch_stats(),
-        symbols   = fetch_symbols(),
-        now       = datetime.now(EST).strftime("%Y-%m-%d %H:%M:%S EST"),
-        filters   = {
+        results  = fetch_signals(days, symbol, signal, strength, timeframe),
+        stats    = fetch_stats(),
+        symbols  = fetch_symbols(),
+        now      = datetime.now(EST).strftime("%Y-%m-%d %H:%M:%S EST"),
+        filters  = {
             "symbol": symbol, "signal": signal,
             "strength": strength, "timeframe": timeframe, "days": days
         }
     )
+
+
+@app.route("/api/ingest", methods=["POST"])
+def api_ingest():
+    """Receive signals from the scanner cron job and save to SQLite."""
+    # Verify secret
+    token = request.headers.get("X-Ingest-Secret", "")
+    if not INGEST_SECRET or not hmac.compare_digest(token, INGEST_SECRET):
+        abort(403)
+
+    signals = request.get_json(silent=True)
+    if not signals or not isinstance(signals, list):
+        abort(400)
+
+    conn     = get_db()
+    inserted = 0
+    window   = (datetime.now(EST) - timedelta(minutes=3)).strftime("%Y-%m-%d %H:%M:%S EST")
+
+    for r in signals:
+        # Duplicate check within 3-min window
+        exists = conn.execute("""
+            SELECT id FROM signals
+            WHERE symbol=? AND signal=? AND timestamp>=?
+            LIMIT 1
+        """, (r["symbol"], r["signal"], window)).fetchone()
+        if exists:
+            continue
+
+        conn.execute("""
+            INSERT INTO signals
+                (timestamp, scan_date, symbol, timeframe,
+                 price, vwap, pct_from_vwap, rsi, divergence,
+                 volume, vol_avg, vol_ratio,
+                 signal, strength, stop_loss, target, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            r["timestamp"], r["scan_date"], r["symbol"], r.get("timeframe", "15m"),
+            r["price"], r["vwap"], r["pct_from_vwap"], r["rsi"], r["divergence"],
+            r["volume"], r["vol_avg"], r["vol_ratio"],
+            r["signal"], r["strength"], r["stop_loss"], r["target"],
+            r.get("status", "New")
+        ))
+        inserted += 1
+
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "inserted": inserted, "received": len(signals)})
 
 
 @app.route("/api/signals")
@@ -141,6 +221,11 @@ def health():
         "time":   datetime.now(EST).isoformat()
     })
 
+
+# ── Init ──────────────────────────────────────────────────────────────────────
+
+with app.app_context():
+    init_db()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

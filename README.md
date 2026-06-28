@@ -1,7 +1,21 @@
-# 🔔 TradeReversal — Signal Scanner
+# 🔔 TradeReversal — Signal Scanner on Render
 
-Intraday reversal signal scanner with a live Flask dashboard on Render.
-**Zero redeploys on data updates** — scanner and dashboard share a persistent disk.
+Intraday reversal signal scanner with a live Flask dashboard.
+**Zero redeploys on data updates.** Scanner POSTs signals to the web service via HTTP.
+
+## Architecture
+
+```
+Render Cron Job (every 2 mins, Mon-Fri 9AM-6PM EST)
+        ↓
+  scanner.py detects signals
+        ↓
+  POST /api/ingest → tradereversal-web (with secret key)
+        ↓
+  Flask stores signals in SQLite on /data (persistent disk)
+        ↓
+  Dashboard reads same disk on every page load ✅
+```
 
 ## Conditions Checked
 
@@ -9,20 +23,21 @@ Intraday reversal signal scanner with a live Flask dashboard on Render.
 |---|---|
 | VWAP Deviation | ≥ 2% from session VWAP |
 | RSI (14) | ≤ 35 oversold (LONG) / ≥ 65 overbought (SHORT) |
-| RSI Divergence | Bullish divergence (LONG) / Bearish divergence (SHORT) |
-| Volume vs Avg | ≥ 1.2× the 20-bar average |
-| Signal Strength | 1–3 (confluence of above conditions) |
+| RSI Divergence | Bullish (LONG) / Bearish (SHORT) |
+| Volume vs Avg | ≥ 1.2× 20-bar average |
+| Signal Strength | 1–3 confluence score |
 
-## Architecture
+## Project Structure
 
 ```
-Render Cron Job — every 2 mins, Mon-Fri 9AM-6PM EST
-        ↓
-  scanner.py writes → /data/signals.db (persistent disk)
-        ↓
-Flask Web Service reads same /data disk on every page load
-        ↓
-  Live dashboard — always current, zero redeploys ✅
+TradeReversal/
+├── app.py                  # Flask: dashboard + /api/ingest endpoint
+├── scanner.py              # Cron Job: scans + POSTs to /api/ingest
+├── requirements.txt
+├── render.yaml             # Render Blueprint — creates both services
+├── custom_tickers.txt      # Add extra tickers here
+└── templates/
+    └── dashboard.html      # Live dashboard UI
 ```
 
 ## Deploy to Render
@@ -39,13 +54,13 @@ git push -u origin main
 ### 2. Create Render Blueprint
 1. Go to https://render.com → **New + → Blueprint**
 2. Connect your **TradeReversal** GitHub repo
-3. Render reads `render.yaml` → creates 2 services automatically:
-   - `tradereversal-web` — Flask dashboard (Web Service)
-   - `tradereversal-scanner` — Scanner (Cron Job, every 2 mins)
-4. Both share `reversal-storage` persistent disk at `/data`
+3. Render reads `render.yaml` → creates 2 services:
+   - `tradereversal-web` — Flask dashboard + ingest API (with /data disk)
+   - `tradereversal-scanner` — Cron Job (no disk — POSTs to web service)
+4. `INGEST_SECRET` is auto-generated and shared between both services
 
 ### 3. Add Email Secrets
-On Render → tradereversal-scanner → **Environment**:
+On Render → **tradereversal-scanner** → Environment:
 
 | Key | Value |
 |---|---|
@@ -54,29 +69,18 @@ On Render → tradereversal-scanner → **Environment**:
 | `EMAIL_RECEIVER` | alert destination email |
 
 ### 4. Add Custom Tickers (optional)
-Edit `custom_tickers.txt`, one ticker per line. Or set `EXTRA_TICKERS` env var: `NFLX,AMD,PLTR`
-
-## Project Structure
-
-```
-TradeReversal/
-├── app.py                  # Flask web server
-├── scanner.py              # Signal scanner (Render Cron Job)
-├── requirements.txt
-├── render.yaml             # Render Blueprint config
-├── custom_tickers.txt      # Extra tickers
-└── templates/
-    └── dashboard.html      # Live dashboard UI
-```
+Edit `custom_tickers.txt`, one ticker per line.
+Or set `EXTRA_TICKERS` env var on the scanner: `NFLX,AMD,PLTR`
 
 ## API Endpoints
 
-| Endpoint | Description |
-|---|---|
-| `/` | Live dashboard |
-| `/api/signals?days=7&signal=LONG&strength=3` | JSON signals |
-| `/api/stats` | JSON summary stats |
-| `/health` | Health check |
+| Endpoint | Method | Description |
+|---|---|---|
+| `/` | GET | Live dashboard |
+| `/api/ingest` | POST | Receive signals from scanner (secret required) |
+| `/api/signals` | GET | JSON signal data |
+| `/api/stats` | GET | JSON summary stats |
+| `/health` | GET | Health check |
 
 ## Disclaimer
 For informational purposes only. Not financial advice.
